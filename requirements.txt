@@ -1,0 +1,6 @@
+crawl4ai
+sentence-transformers
+streamlit
+pymongo
+python-dotenv
+torch
