@@ -53,7 +53,7 @@ async def run_pipeline():
         title = document["title"]
         content = document["content"]
 
-        chunks = chunk_text(content)
+        chunks = chunk_text(content, title=title)
 
         if not chunks:
             continue

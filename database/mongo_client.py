@@ -146,10 +146,17 @@ def insert_documents(
 
 def vector_search(
     query_embedding: List[float],
-    limit: int = 5
+    limit: int = 5,
+    num_candidates: Optional[int] = None
 ) -> List[Dict[str, Any]]:
     """
     Perform vector search using MongoDB Atlas Vector Search.
+
+    Args:
+        query_embedding: The query embedding vector.
+        limit:           Maximum number of results to return.
+        num_candidates:  Number of ANN candidates to consider.  When
+                         ``None``, defaults to ``max(limit * 10, 50)``.
     """
 
     if not query_embedding:
@@ -157,11 +164,12 @@ def vector_search(
 
     col = get_collection()
 
-    # Keep result limit reasonable
-    limit = max(1, min(limit, 20))
+    # Allow a larger result set for downstream re-ranking.
+    limit = max(1, min(limit, 50))
 
     # Number of candidates considered during vector search
-    num_candidates = max(limit * 10, 50)
+    if num_candidates is None:
+        num_candidates = max(limit * 10, 50)
 
     pipeline = [
         {

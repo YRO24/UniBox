@@ -2,6 +2,7 @@ from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+from sentence_transformers import CrossEncoder
 
 from database.mongo_client import (
     vector_search,
@@ -16,6 +17,20 @@ app = FastAPI(
     description="Backend API for UniBox semantic search",
     version="1.0.0"
 )
+
+
+# ---------------------------------------------------------
+# CROSS-ENCODER RE-RANKER  (loaded once at startup)
+# ---------------------------------------------------------
+
+CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+print(f"[API] Loading cross-encoder model: {CROSS_ENCODER_MODEL} ...")
+_reranker = CrossEncoder(CROSS_ENCODER_MODEL)
+print("[API] Cross-encoder loaded successfully.")
+
+# Number of candidates to retrieve from vector search before re-ranking.
+RERANK_CANDIDATE_COUNT = 30
 
 
 # ---------------------------------------------------------
@@ -70,7 +85,7 @@ def health():
 
 
 # ---------------------------------------------------------
-# SEMANTIC SEARCH
+# SEMANTIC SEARCH  (two-stage: vector recall → cross-encoder re-rank)
 # ---------------------------------------------------------
 
 @app.post("/search")
@@ -97,11 +112,43 @@ def search(request: SearchRequest):
 
         query_embedding = embeddings[0]
 
-        # Search MongoDB Atlas Vector Search
-        results = vector_search(
+        # --------------------------------------------------
+        # Stage 1: Broad vector recall (top 30 candidates)
+        # --------------------------------------------------
+        candidates = vector_search(
             query_embedding=query_embedding,
-            limit=request.limit
+            limit=RERANK_CANDIDATE_COUNT
         )
+
+        if not candidates:
+            return {
+                "query": query,
+                "count": 0,
+                "results": []
+            }
+
+        # --------------------------------------------------
+        # Stage 2: Cross-encoder re-ranking
+        # --------------------------------------------------
+        # Build (query, document_text) pairs for the cross-encoder.
+        pairs = [
+            [query, candidate["text"]]
+            for candidate in candidates
+        ]
+
+        # The cross-encoder returns a relevance score for each pair.
+        ce_scores = _reranker.predict(pairs).tolist()
+
+        # Attach the cross-encoder score to each candidate.
+        for candidate, ce_score in zip(candidates, ce_scores):
+            candidate["vector_score"] = candidate.pop("score", 0.0)
+            candidate["rerank_score"] = float(ce_score)
+
+        # Sort by cross-encoder score (higher = more relevant).
+        candidates.sort(key=lambda c: c["rerank_score"], reverse=True)
+
+        # Return only the top `limit` results.
+        results = candidates[: request.limit]
 
         return {
             "query": query,

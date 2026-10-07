@@ -22,9 +22,26 @@ print("[CHUNKER] Tokenizer loaded successfully.")
 
 def chunk_text(
     text: str,
+    title: str = "",
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     overlap: int = DEFAULT_OVERLAP
 ) -> List[str]:
+    """
+    Split text into overlapping token-based chunks.
+
+    When *title* is provided, each chunk is prefixed with
+    ``"Title: {title} | Content: "`` so the embedding model can
+    anchor the chunk to its source document topic.
+
+    Args:
+        text:       Raw document text to chunk.
+        title:      Document title to prepend for context-aware embeddings.
+        chunk_size: Maximum tokens per chunk (excluding prefix).
+        overlap:    Number of tokens shared between consecutive chunks.
+
+    Returns:
+        List of context-enriched text chunks.
+    """
 
     print("[CHUNKER] chunk_text() started.")
 
@@ -38,6 +55,8 @@ def chunk_text(
     print(f"[CHUNKER] Input characters: {len(text)}")
     print(f"[CHUNKER] Chunk size: {chunk_size}")
     print(f"[CHUNKER] Overlap: {overlap}")
+    if title:
+        print(f"[CHUNKER] Title prefix: {title}")
 
     print("[CHUNKER] Tokenizing input text...")
 
@@ -49,6 +68,11 @@ def chunk_text(
 
     print(f"[CHUNKER] Tokenization complete.")
     print(f"[CHUNKER] Total tokens: {len(tokens)}")
+
+    # Build the context prefix that will be prepended to every chunk.
+    context_prefix = ""
+    if title and title.strip():
+        context_prefix = f"Title: {title.strip()} | Content: "
 
     chunks = []
 
@@ -72,7 +96,10 @@ def chunk_text(
         ).strip()
 
         if chunk:
-            chunks.append(chunk)
+            # Prepend the title context so the embedding captures
+            # what this chunk is actually about.
+            enriched_chunk = f"{context_prefix}{chunk}" if context_prefix else chunk
+            chunks.append(enriched_chunk)
 
             print(
                 f"[CHUNKER] Chunk {chunk_number} created "
