@@ -158,6 +158,51 @@ _EXCLUDED_TAGS = [
     "iframe"
 ]
 
+# ---------------------------------------------------------------------------
+# CRM modal-strip JavaScript hook
+# ---------------------------------------------------------------------------
+# Injected into every page *before* crawl4ai serializes the DOM.
+# Targets:
+#   .modal / .popup          — generic overlay libraries
+#   [id*="npf"]              — NoPaperForms widgets (KJSSE "Enquire Now")
+#   [class*="enquiry"]       — site-specific enquiry containers
+#   .lead-form               — generic lead-capture forms
+#   .backdrop / .overlay     — dimming layers that block scroll
+#   [data-mfp-src]           — Magnific-Popup anchors
+#   #cookie-notice           — cookie banners that push content down
+# After removal, body scroll is unconditionally restored so the full
+# page height is accessible to the headless browser.
+_MODAL_STRIP_JS: str = """
+(function stripCRMModals() {
+    const selectors = [
+        '.modal',
+        '.popup',
+        '[id*="npf"]',
+        '[class*="enquiry"]',
+        '.lead-form',
+        '.backdrop',
+        '.overlay',
+        '[data-mfp-src]',
+        '#cookie-notice',
+        '.cookie-bar',
+        '.pum-overlay',
+        '.pum-container'
+    ];
+    selectors.forEach(function(sel) {
+        document.querySelectorAll(sel).forEach(function(el) {
+            el.remove();
+        });
+    });
+    // Restore scroll in case a modal locked it
+    document.body.style.overflow = 'auto';
+    document.documentElement.style.overflow = 'auto';
+    // Remove any inline style that hides body content
+    if (document.body.style.height === '100%' && document.body.style.overflow === 'hidden') {
+        document.body.style.height = '';
+    }
+})();
+"""
+
 
 async def crawl_urls(urls: list[str]) -> list[CrawledDocument]:
     """
@@ -203,7 +248,14 @@ async def crawl_urls(urls: list[str]) -> list[CrawledDocument]:
     semaphore = asyncio.Semaphore(_SEMAPHORE_COUNT)
 
     async def _crawl_seed(crawler: AsyncWebCrawler, seed_url: str) -> None:
-        """Crawl a single seed URL (with depth) under a semaphore."""
+        """Crawl a single seed URL (with depth) under a semaphore.
+
+        The JS hook :data:`_MODAL_STRIP_JS` is executed in the page context
+        *before* crawl4ai serializes the DOM, ensuring that CRM overlays
+        (e.g. NoPaperForms, Magnific-Popup, generic enquiry modals) are
+        removed and that ``document.body.style.overflow`` is restored so the
+        full page content is reachable during extraction.
+        """
         async with semaphore:
             deep_strategy = BFSDeepCrawlStrategy(
                 max_depth=_MAX_DEPTH,
@@ -216,6 +268,10 @@ async def crawl_urls(urls: list[str]) -> list[CrawledDocument]:
                 markdown_generator=md_generator,
                 excluded_tags=_EXCLUDED_TAGS,
                 page_timeout=_PAGE_TIMEOUT_MS,
+                # Run the modal-strip hook before DOM extraction
+                js_code=_MODAL_STRIP_JS,
+                remove_overlay_elements=True,
+                remove_consent_popups=True,
                 verbose=False,
             )
 
