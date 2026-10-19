@@ -1,91 +1,39 @@
 {
-  "_comment": [
-    "UniBox Statutory Seed Registry — single source of truth for all ingestion sources.",
-    "Decouple marketing/portal URLs from authoritative data sources.",
-    "",
-    "Schema per entry:",
-    "  type:    'url'  → passed to crawl4ai HTML crawler",
-    "           'pdf_url'  → passed to pdf_loader.load_pdf_text (remote HTTPS PDF)",
-    "           'pdf_file' → passed to pdf_loader.load_pdf_text (local relative path)",
-    "  source:  URL string or path relative to the repository root",
-    "  title:   Human-readable semantic title injected into chunk_text(title=...)",
-    "  tags:    Free-form labels used for filtering / selective re-ingestion",
-    "  active:  Set to false to skip without deleting the entry"
-  ],
-
-  "html_sources": [
+  "sources": [
     {
       "type": "url",
-      "source": "https://kjsce.somaiya.edu",
-      "title": "KJSCE Home — K J Somaiya College of Engineering",
-      "tags": ["kjsce", "portal", "home"],
-      "active": true
+      "url": "https://kjsce.somaiya.edu/en/admission/btech",
+      "description": "Main Admission Page"
     },
     {
       "type": "url",
-      "source": "https://www.somaiya.edu",
-      "title": "Somaiya Vidyavihar University — Main Portal",
-      "tags": ["somaiya", "portal", "home"],
-      "active": true
+      "url": "https://kjsce.somaiya.edu/en/view-mandatory-disclosure",
+      "description": "Mandatory Disclosures"
     },
     {
       "type": "url",
-      "source": "https://kjsce.somaiya.edu/en/admissions",
-      "title": "KJSCE Admissions — Eligibility, Process & Important Dates",
-      "tags": ["kjsce", "admissions"],
-      "active": true
-    },
-    {
-      "type": "url",
-      "source": "https://kjsce.somaiya.edu/en/about",
-      "title": "KJSCE About — Vision, Mission & Accreditation",
-      "tags": ["kjsce", "about", "naac", "nba"],
-      "active": true
-    },
-    {
-      "type": "url",
-      "source": "https://kjsce.somaiya.edu/en/placements",
-      "title": "KJSCE Placements — Recruiters, CTC Statistics & Internships",
-      "tags": ["kjsce", "placements"],
-      "active": true
-    }
-  ],
-
-  "pdf_sources": [
-    {
-      "type": "pdf_url",
-      "source": "https://kjsce.somaiya.edu/assets/docs/mandatory_disclosure.pdf",
-      "title": "KJSCE Mandatory Disclosure — AICTE Statutory Compliance AY 2026-27",
-      "tags": ["kjsce", "aicte", "mandatory_disclosure", "statutory"],
-      "active": true
-    },
-    {
-      "type": "pdf_url",
-      "source": "https://kjsce.somaiya.edu/assets/docs/fee_structure_ug_2026.pdf",
-      "title": "KJSSE B.Tech Fee Structure AY 2026-27 — All Branches (Tuition, Dev & Other Fees)",
-      "tags": ["kjsce", "fees", "btech", "ug", "2026"],
-      "active": true
-    },
-    {
-      "type": "pdf_url",
-      "source": "https://kjsce.somaiya.edu/assets/docs/fee_structure_pg_2026.pdf",
-      "title": "KJSSE M.Tech / MCA Fee Structure AY 2026-27",
-      "tags": ["kjsce", "fees", "mtech", "mca", "pg", "2026"],
-      "active": true
+      "url": "https://scholarships.somaiya.edu/en/",
+      "description": "Scholarships and Financial Aid"
     },
     {
       "type": "pdf_file",
-      "source": "data/raw_docs/kjsce_fee_structure_first_year_2026.pdf",
-      "title": "KJSSE B.Tech First Year Fee Structure AY 2026-27",
-      "tags": ["kjsce", "fees", "btech", "first_year", "2026"],
-      "active": true
+      "path": "data/raw_docs/Admission-Committee.pdf",
+      "description": "Authoritative local document"
     },
     {
       "type": "pdf_file",
-      "source": "data/raw_docs/kjsce_mandatory_disclosure_2025.pdf",
-      "title": "KJSCE Mandatory Disclosure AY 2025-26 — AICTE Statutory Compliance",
-      "tags": ["kjsce", "aicte", "mandatory_disclosure", "statutory", "2025"],
-      "active": true
+      "path": "data/raw_docs/Finance-Committee.pdf",
+      "description": "Authoritative local document"
+    },
+    {
+      "type": "pdf_file",
+      "path": "data/raw_docs/Grievance-Redressal-Committee.pdf",
+      "description": "Authoritative local document"
+    },
+    {
+      "type": "pdf_file",
+      "path": "data/raw_docs/SVU+Brochure conv conv.pdf",
+      "description": "Authoritative local document"
     }
   ]
 }

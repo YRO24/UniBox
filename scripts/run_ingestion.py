@@ -114,12 +114,36 @@ def load_seed_registry(
             return bool(set(entry.get("tags", [])) & set(filter_tags))
         return True
 
-    html_sources: list[dict[str, Any]] = [
-        e for e in data.get("html_sources", []) if _keep(e)
-    ]
-    pdf_sources: list[dict[str, Any]] = [
-        e for e in data.get("pdf_sources", []) if _keep(e)
-    ]
+    html_sources: list[dict[str, Any]] = []
+    pdf_sources: list[dict[str, Any]] = []
+
+    # Support root "sources" list schema
+    if "sources" in data and isinstance(data["sources"], list):
+        for item in data["sources"]:
+            if not _keep(item):
+                continue
+            item_type = item.get("type", "").lower()
+            if item_type == "url":
+                html_sources.append({
+                    "source": item.get("url") or item.get("source", ""),
+                    "title": item.get("description") or item.get("title", ""),
+                    "tags": item.get("tags", []),
+                    "active": item.get("active", True),
+                })
+            elif item_type in ("pdf_file", "pdf_url"):
+                pdf_sources.append({
+                    "source": item.get("path") or item.get("source") or item.get("url", ""),
+                    "title": item.get("description") or item.get("title", ""),
+                    "type": item_type,
+                    "tags": item.get("tags", []),
+                    "active": item.get("active", True),
+                })
+
+    # Also support categorized keys "html_sources" and "pdf_sources"
+    if "html_sources" in data:
+        html_sources.extend([e for e in data.get("html_sources", []) if _keep(e)])
+    if "pdf_sources" in data:
+        pdf_sources.extend([e for e in data.get("pdf_sources", []) if _keep(e)])
 
     logger.info(
         "Registry loaded — %d HTML source(s), %d PDF source(s) will be processed.",
@@ -254,9 +278,14 @@ def collect_pdf_documents(
     documents: list[IngestableDocument] = []
 
     for entry in pdf_sources:
-        source: str = entry["source"]
-        title: str = entry.get("title", source)
-        source_type: str = entry.get("type", "pdf_url")
+        source: str = entry.get("source") or entry.get("path") or entry.get("url", "")
+        title: str = entry.get("title") or entry.get("description", source)
+        source_type: str = entry.get("type", "pdf_file" if "path" in entry else "pdf_url")
+
+        # Enrich generic descriptions into semantic titles
+        if title == "Authoritative local document" or not title:
+            clean_name = Path(source).stem.replace("-", " ").replace("_", " ").title()
+            title = f"{clean_name} — Authoritative local document"
 
         # Resolve local paths relative to the project root.
         resolved_source: str = source
