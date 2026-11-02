@@ -8,3 +8,5 @@ fastapi
 uvicorn
 requests
 pypdf
+google-genai
+numpy

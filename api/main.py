@@ -1,92 +1,95 @@
-from typing import List, Optional
+
+"""
+UniBox API: Local PDF Retrieval + Gemini.
+MongoDB is disabled in this phase.
+"""
+
+from contextlib import asynccontextmanager
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from sentence_transformers import CrossEncoder
 
-from database.mongo_client import (
-    vector_search,
-    store_feedback,
-    check_database_connection
+from retrieval.local_retriever import (
+    build_local_index,
+    search_local
 )
-from ingestion.embedder import generate_embeddings
+
+from llm.gemini_service import (
+    generate_answer,
+    MODEL_NAME
+)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+
+    print("[STARTUP] Building local PDF index...", flush=True)
+
+    try:
+        count = build_local_index()
+
+        app.state.index_status = f"ready ({count} chunks)"
+
+        print("[STARTUP] PDF index ready!", flush=True)
+
+    except Exception as exc:
+
+        app.state.index_status = f"error: {exc}"
+
+        print(f"[STARTUP ERROR] {exc}", flush=True)
+
+    yield
 
 
 app = FastAPI(
     title="UniBox RAG API",
-    description="Backend API for UniBox semantic search",
-    version="1.0.0"
+    description="Local PDF retrieval with Gemini",
+    version="2.0.0",
+    lifespan=lifespan
 )
 
 
-# ---------------------------------------------------------
-# CROSS-ENCODER RE-RANKER  (loaded once at startup)
-# ---------------------------------------------------------
-
-CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-
-print(f"[API] Loading cross-encoder model: {CROSS_ENCODER_MODEL} ...")
-_reranker = CrossEncoder(CROSS_ENCODER_MODEL)
-print("[API] Cross-encoder loaded successfully.")
-
-# Number of candidates to retrieve from vector search before re-ranking.
-RERANK_CANDIDATE_COUNT = 30
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(..., max_length=4000)
 
 
-# ---------------------------------------------------------
-# REQUEST MODELS
-# ---------------------------------------------------------
+class ChatRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=2000)
+    history: list[ChatMessage] = Field(default_factory=list)
+
 
 class SearchRequest(BaseModel):
-    query: str = Field(
-        ...,
-        min_length=1,
-        description="User search query"
-    )
+    query: str = Field(..., min_length=1, max_length=2000)
+    limit: int = Field(default=5, ge=1, le=10)
 
-    limit: int = Field(
-        default=5,
-        ge=1,
-        le=20
-    )
-
-
-class FeedbackRequest(BaseModel):
-    query: str
-    helpful: bool
-    result_urls: Optional[List[str]] = None
-
-
-# ---------------------------------------------------------
-# ROOT ENDPOINT
-# ---------------------------------------------------------
 
 @app.get("/")
 def root():
+
     return {
         "message": "UniBox RAG API is running",
-        "status": "ok"
+        "status": "ok",
+        "mode": "local-pdf + Gemini",
+        "mongodb": "disabled"
     }
 
-
-# ---------------------------------------------------------
-# HEALTH CHECK
-# ---------------------------------------------------------
 
 @app.get("/health")
 def health():
 
-    mongo_ok = check_database_connection()
-
     return {
         "api": "ok",
-        "mongodb": "connected" if mongo_ok else "disconnected"
+        "mongodb": "disabled",
+        "local_pdf_index": getattr(
+            app.state,
+            "index_status",
+            "not initialized"
+        ),
+        "gemini_model": MODEL_NAME
     }
 
-
-# ---------------------------------------------------------
-# SEMANTIC SEARCH  (two-stage: vector recall → cross-encoder re-rank)
-# ---------------------------------------------------------
 
 @app.post("/search")
 def search(request: SearchRequest):
@@ -101,54 +104,7 @@ def search(request: SearchRequest):
 
     try:
 
-        # Generate embedding for user's query
-        embeddings = generate_embeddings([query])
-
-        if not embeddings:
-            raise HTTPException(
-                status_code=500,
-                detail="Could not generate query embedding."
-            )
-
-        query_embedding = embeddings[0]
-
-        # --------------------------------------------------
-        # Stage 1: Broad vector recall (top 30 candidates)
-        # --------------------------------------------------
-        candidates = vector_search(
-            query_embedding=query_embedding,
-            limit=RERANK_CANDIDATE_COUNT
-        )
-
-        if not candidates:
-            return {
-                "query": query,
-                "count": 0,
-                "results": []
-            }
-
-        # --------------------------------------------------
-        # Stage 2: Cross-encoder re-ranking
-        # --------------------------------------------------
-        # Build (query, document_text) pairs for the cross-encoder.
-        pairs = [
-            [query, candidate["text"]]
-            for candidate in candidates
-        ]
-
-        # The cross-encoder returns a relevance score for each pair.
-        ce_scores = _reranker.predict(pairs).tolist()
-
-        # Attach the cross-encoder score to each candidate.
-        for candidate, ce_score in zip(candidates, ce_scores):
-            candidate["vector_score"] = candidate.pop("score", 0.0)
-            candidate["rerank_score"] = float(ce_score)
-
-        # Sort by cross-encoder score (higher = more relevant).
-        candidates.sort(key=lambda c: c["rerank_score"], reverse=True)
-
-        # Return only the top `limit` results.
-        results = candidates[: request.limit]
+        results = search_local(query, request.limit)
 
         return {
             "query": query,
@@ -156,41 +112,83 @@ def search(request: SearchRequest):
             "results": results
         }
 
-    except HTTPException:
-        raise
-
-    except Exception as e:
+    except Exception as exc:
 
         raise HTTPException(
             status_code=500,
-            detail=f"Search failed: {str(e)}"
+            detail=f"Local document search failed: {exc}"
         )
 
 
-# ---------------------------------------------------------
-# FEEDBACK
-# ---------------------------------------------------------
+@app.post("/chat")
+def chat(request: ChatRequest):
 
-@app.post("/feedback")
-def feedback(request: FeedbackRequest):
+    question = request.question.strip()
+
+    if not question:
+        raise HTTPException(
+            status_code=400,
+            detail="Question cannot be empty."
+        )
 
     try:
 
-        feedback_id = store_feedback(
-            query=request.query,
-            helpful=request.helpful,
-            result_urls=request.result_urls
+        print("[CHAT] Received question:", question, flush=True)
+
+        print("[CHAT] Searching local PDFs...", flush=True)
+
+        retrieved = search_local(question, limit=5)
+
+        print(
+            f"[CHAT] Retrieved {len(retrieved)} chunks",
+            flush=True
         )
 
+        print("[CHAT] Sending context to Gemini...", flush=True)
+
+        answer = generate_answer(
+            question=question,
+            retrieved_chunks=retrieved,
+            history=[
+                item.model_dump()
+                for item in request.history
+            ]
+        )
+
+        print("[CHAT] Gemini response received!", flush=True)
+
+        sources = []
+        seen = set()
+
+        for item in retrieved:
+
+            if item["source"] not in seen:
+
+                sources.append({
+                    "title": item["title"],
+                    "source": item["source"],
+                    "score": item["score"]
+                })
+
+                seen.add(item["source"])
+
         return {
-            "success": True,
-            "message": "Feedback recorded successfully.",
-            "feedback_id": feedback_id
+            "question": question,
+            "answer": answer,
+            "sources": sources,
+            "retrieved_chunks": len(retrieved)
         }
 
-    except Exception as e:
+    except RuntimeError as exc:
+
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc)
+        )
+
+    except Exception as exc:
 
         raise HTTPException(
             status_code=500,
-            detail=f"Could not store feedback: {str(e)}"
+            detail=f"Could not generate answer: {exc}"
         )
